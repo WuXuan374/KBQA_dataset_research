@@ -1,9 +1,9 @@
+# 0907：舒意恒学长的代码基础上，添加新的功能
 import collections
 import json
 import re
 
 from functools import reduce
-from typing import Callable
 # from utils.similarity_utils import literal_similarity
 
 
@@ -50,6 +50,49 @@ class KQAProJsonLoader:
     def get_sparql_list(self):
         # return all sparql in list format
         return list(map(lambda item: item['sparql'], self.data))
+
+    def get_sparql_templates(self):
+        res = set()
+        for idx in range(0, self.len):
+            sparql = self.get_sparql_by_idx(idx)
+            literals = re.findall('".*?"', sparql)
+            for literal in literals:
+                sparql = sparql.replace(literal, '""')
+
+            relations = re.findall('<.*?>', sparql)
+            for relation in relations:
+                if relation.startswith('<pred:'):
+                    continue
+                sparql = sparql.replace(relation, '<relation>')
+
+            numbers = re.findall(' [0-9]+', sparql) + re.findall(' -[0-9]+', sparql)
+            for number in numbers:
+                sparql = sparql.replace(number, ' number')
+
+            # FILTER 里头的条件 >、!= 等进行抽象
+            filter_statements = re.findall(r'FILTER \( \?v(?:_\d)? [><=] ', sparql)
+            for fs in filter_statements:
+                sparql = sparql.replace(fs, 'FILTER ( ?v cond')
+
+            res.add(sparql.replace('^^xsd:double', '').replace('^^xsd:date', ''))
+
+        res = list(res)
+        res.sort(key=lambda x: len(x))
+        return res
+
+
+def remove_filter_operator(str):
+    # FILTER （?v > number）, >, <, =, != 统一用 cond 表示
+    filter_pattern = r'FILTER \( \?v(?:_\d)? [^)]* [^)]* \)'
+    old_filters = re.findall(filter_pattern, str)
+    for old_filter in old_filters:
+        print(old_filter)
+        new_filter = re.sub('[<>=]', 'cond', old_filter)
+        new_filter = re.sub('!', 'cond', new_filter)
+        print(new_filter)
+        str = re.sub(filter_pattern, new_filter, str)
+        print(str)
+    return str
 
 
 def print_boolean_questions(dataloader: KQAProJsonLoader):
@@ -245,8 +288,79 @@ def extract_attribute_information(dataloader: KQAProJsonLoader):
     return res
 
 
+def extract_filter_information(dataloader: KQAProJsonLoader):
+    # 关注的模式 ?(q)pv(_1) <pred:year> ?v(_1) . FILTER () .
+    res = dict()
+    res['dataset_len'] = dataloader.get_len()
+    res['FILTER_num'] = 0
+    # 总共有多少句 sparql 中存在 FILTER 运算符 （每一句可能含多个 FILTER)
+    res['Sparql_contains_FILTER'] = 0
+    res['FITLER_on_qpv'] = 0
+    # 一句 sparql 中 FITLER 出现的频率表（只记录>1）
+    res['FILTER_freq'] = collections.defaultdict(int)
+    for idx in range(0, dataloader.get_len()):
+        sparql = dataloader.get_sparql_by_idx(idx)
+        patterns = re.findall(r'q?pv(?:_\d)? <[^>]*> \?v(?:_\d)? . FILTER \([^)]*\) .', sparql)
+        res['FILTER_num'] += len(patterns)
+        qpv_len = len(list(filter(lambda x: re.search(r'qpv(?:_\d)?', x), patterns)))
+        if qpv_len > 0:
+            res['FITLER_on_qpv'] += qpv_len
+        if len(patterns) > 1:
+            res['FILTER_freq'][len(patterns)] += 1
+        if len(patterns) >= 1:
+            res['Sparql_contains_FILTER'] += 1
+    return res
+
+
+def extract_ORDERBY_information(dataloader: KQAProJsonLoader):
+    # 首先观察 ORDER_BY 关键字出现的次数；每个 sparql 语句中是否包含多次 ORDER BY 操作
+    # 其次含ORDER BY 问题可以划分为三个 pattern:
+    # 1. "SELECT ?e WHERE { { ...  } UNION { ...  } ?e <duration> ?pv . ?pv <pred:value> ?v .  } ORDER BY DESC(?v) LIMIT 1"
+    # 示例: Who has a smaller Erds number, Enrico Fermi or Natalie Portman?
+    # 2. SELECT ?e WHERE { ... FILTER ...} ORDER BY DESC(?v) LIMIT 1
+    # 示例：Among counties of Indiana, established before 1827, which one covers the largest area ?
+    # 3. SELECT ?e WHERE { ... } ORDER BY DESC(?v) LIMIT 1
+    # 示例: What animated series produced by Fox Broadcasting Company has the least episodes?
+    res = dict()
+    res['dataset_len'] = dataloader.get_len()
+    res['ORDER_BY_NUM'] = 0
+    res['SPARQL_CONTAINS_ORDER_BY'] = 0
+    res['union_pattern_nums'] = 0
+    union_pattern_regex = r'{ {[^}]*} UNION {[^}]*}.* ORDER BY .* LIMIT'
+    res['filter_pattern_nums'] = 0
+    filter_pattern_regex = r'{[^}]*FILTER[^}]*} ORDER BY .* LIMIT'
+    res['normal_pattern_nums'] = 0
+    normal_pattern_nums = r'{[^}]*} ORDER BY .* LIMIT'
+
+    for idx in range(0, dataloader.get_len()):
+        sparql = dataloader.get_sparql_by_idx(idx)
+        order_by_nums = len(re.findall('ORDER BY', sparql))
+        res['ORDER_BY_NUM'] += order_by_nums
+        if order_by_nums >= 1:
+            # 确认一下 ORDER BY 不与 qpv 同时出现
+            # if re.search(r'qpv(?:_\d)?', sparql):
+            #     print(sparql)
+            res['SPARQL_CONTAINS_ORDER_BY'] += 1
+            if re.search(union_pattern_regex, sparql):
+                res['union_pattern_nums'] += 1
+            if re.search(filter_pattern_regex, sparql):
+                res['filter_pattern_nums'] += 1
+            elif re.search(normal_pattern_nums, sparql):
+                res['normal_pattern_nums'] += 1
+
+    return res
+
+
+def write_json_file(data_train, data_val, path, func):
+    info = dict()
+    info['train'] = func(data_train)
+    info['val'] = func(data_val)
+    with open(path, 'w+') as f:
+        json.dump(info, f, indent=4)
+
+
 if __name__ == "__main__":
-    train_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/train.json')
+    # train_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/train.json')
     val_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/val.json')
     # test_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/test.json')
     # print_boolean_questions(train_data)
@@ -257,14 +371,11 @@ if __name__ == "__main__":
     # print_program_templates(val_data)
     # print(val_data.get_program_by_idx(5))
     # print_boolean_questions(val_data)
-    # entities_info = dict()
-    # entities_info['train'] = extract_entities_information(train_data)
-    # entities_info['val'] = extract_entities_information(val_data)
-    # with open('./output/entities_info.json', 'w+') as f:
-    #     json.dump(entities_info, f, indent=4)
 
-    attribute_info = dict()
-    attribute_info['train'] = extract_attribute_information(train_data)
-    attribute_info['val'] = extract_attribute_information(val_data)
-    with open('./output/attribute_info.json', 'w+') as f:
-        json.dump(attribute_info, f, indent=4)
+    # write_json_file(train_data, val_data, './output/entities_info.json', extract_entities_information)
+
+    # write_json_file(train_data, val_data, './output/attribute_info.json', extract_attribute_information)
+
+    # write_json_file(train_data, val_data, './output/FILTER_info.json', extract_filter_information)
+
+    # write_json_file(train_data, val_data, './output/ORDER_BY_info.json', extract_ORDERBY_information)

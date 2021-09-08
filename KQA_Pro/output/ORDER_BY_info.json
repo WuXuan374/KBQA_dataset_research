@@ -1,0 +1,18 @@
+{
+    "train": {
+        "dataset_len": 94376,
+        "ORDER_BY_NUM": 17535,
+        "SPARQL_CONTAINS_ORDER_BY": 17535,
+        "union_pattern_nums": 13247,
+        "filter_pattern_nums": 2614,
+        "normal_pattern_nums": 1674
+    },
+    "val": {
+        "dataset_len": 11797,
+        "ORDER_BY_NUM": 2152,
+        "SPARQL_CONTAINS_ORDER_BY": 2152,
+        "union_pattern_nums": 1604,
+        "filter_pattern_nums": 315,
+        "normal_pattern_nums": 233
+    }
+}

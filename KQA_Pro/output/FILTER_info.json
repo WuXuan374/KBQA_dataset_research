@@ -1,0 +1,20 @@
+{
+    "train": {
+        "dataset_len": 94376,
+        "FILTER_num": 12685,
+        "Sparql_contains_FILTER": 12299,
+        "FITLER_on_qpv": 0,
+        "FILTER_freq": {
+            "2": 386
+        }
+    },
+    "val": {
+        "dataset_len": 11797,
+        "FILTER_num": 1584,
+        "Sparql_contains_FILTER": 1531,
+        "FITLER_on_qpv": 0,
+        "FILTER_freq": {
+            "2": 53
+        }
+    }
+}
