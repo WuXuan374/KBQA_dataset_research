@@ -51,49 +51,6 @@ class KQAProJsonLoader:
         # return all sparql in list format
         return list(map(lambda item: item['sparql'], self.data))
 
-    def get_sparql_templates(self):
-        res = set()
-        for idx in range(0, self.len):
-            sparql = self.get_sparql_by_idx(idx)
-            literals = re.findall('".*?"', sparql)
-            for literal in literals:
-                sparql = sparql.replace(literal, '""')
-
-            relations = re.findall('<.*?>', sparql)
-            for relation in relations:
-                if relation.startswith('<pred:'):
-                    continue
-                sparql = sparql.replace(relation, '<relation>')
-
-            numbers = re.findall(' [0-9]+', sparql) + re.findall(' -[0-9]+', sparql)
-            for number in numbers:
-                sparql = sparql.replace(number, ' number')
-
-            # FILTER 里头的条件 >、!= 等进行抽象
-            filter_statements = re.findall(r'FILTER \( \?v(?:_\d)? [><=] ', sparql)
-            for fs in filter_statements:
-                sparql = sparql.replace(fs, 'FILTER ( ?v cond')
-
-            res.add(sparql.replace('^^xsd:double', '').replace('^^xsd:date', ''))
-
-        res = list(res)
-        res.sort(key=lambda x: len(x))
-        return res
-
-
-def remove_filter_operator(str):
-    # FILTER （?v > number）, >, <, =, != 统一用 cond 表示
-    filter_pattern = r'FILTER \( \?v(?:_\d)? [^)]* [^)]* \)'
-    old_filters = re.findall(filter_pattern, str)
-    for old_filter in old_filters:
-        print(old_filter)
-        new_filter = re.sub('[<>=]', 'cond', old_filter)
-        new_filter = re.sub('!', 'cond', new_filter)
-        print(new_filter)
-        str = re.sub(filter_pattern, new_filter, str)
-        print(str)
-    return str
-
 
 def print_boolean_questions(dataloader: KQAProJsonLoader):
     dataloader.data.sort(key=lambda x: (len(x['sparql'].split('\n')), len(x['sparql'])))
@@ -351,6 +308,18 @@ def extract_ORDERBY_information(dataloader: KQAProJsonLoader):
     return res
 
 
+def get_verify_template(dataloader: KQAProJsonLoader):
+    templates = dataloader.get_sparql_templates()
+
+    verify_templates = filter(lambda x: 'ASK' in x, templates)
+    length = 0
+    for template in verify_templates:
+        print(template)
+        length += 1
+    print(length)
+    print(len(templates))
+
+
 def write_json_file(data_train, data_val, path, func):
     info = dict()
     info['train'] = func(data_train)
@@ -360,7 +329,7 @@ def write_json_file(data_train, data_val, path, func):
 
 
 if __name__ == "__main__":
-    # train_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/train.json')
+    train_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/train.json')
     val_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/val.json')
     # test_data = KQAProJsonLoader('./dataset/KQA-Pro-v1.0/test.json')
     # print_boolean_questions(train_data)
@@ -379,3 +348,9 @@ if __name__ == "__main__":
     # write_json_file(train_data, val_data, './output/FILTER_info.json', extract_filter_information)
 
     # write_json_file(train_data, val_data, './output/ORDER_BY_info.json', extract_ORDERBY_information)
+
+    # templates = val_data.get_sparql_templates()
+    # for template in templates:
+    #     if 'COUNT' in template:
+    #         print(template)
+    print_program_templates(val_data)
